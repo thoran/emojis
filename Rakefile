@@ -5,27 +5,21 @@
 #   docker run -it --rm -v "$(pwd)":/src ruby bash -c "cd /src && bundle install && rake"
 
 require 'json'
+require 'exiftool'
 
-desc "Pick a random emoji"
-task :random do
-  emojis = []
+def read_all_emoji
+  emoji = []
 
-  emojis_dir = File.dirname(__FILE__)
-  Dir.glob("#{emojis_dir}/img-*.json").each do |catalogue|
-    emojis.concat JSON.parse(File.read(catalogue)).reverse
+  Dir.glob("#{File.dirname(__FILE__)}/img-*.json").each do |catalogue|
+    emoji.concat JSON.parse(File.read(catalogue)).reverse
   end
 
-  emoj = emojis[Random.rand(emojis.count)]
-
-  puts ":#{emoj['name']}:"
+  emoji
 end
 
+desc "Generate readme emoji tables"
 task :default do
-  emojis = []
-
-  Dir.glob("img-*.json").each do |catalogue|
-    emojis.concat JSON.parse(File.read(catalogue)).reverse
-  end
+  emojis = read_all_emoji
 
   groups = {}
 
@@ -73,6 +67,64 @@ task :default do
   end
 end
 
+task :validate do
+  puts "🔍 Validating emoji..."
+
+  WARNINGS = []
+  ERRORS = []
+
+  def add_warning(text)
+    if !WARNINGS.include? text
+      WARNINGS.push text
+    end
+    puts " 💁🏻 Warning: #{text}"
+  end
+
+  def add_error(text)
+    if !ERRORS.include? text
+      ERRORS.push text
+    end
+    puts " 🚨 Error: #{text}"
+  end
+
+  emojis = read_all_emoji
+
+  aliases = []
+
+  emojis.each do |emoji|
+    # Verify alias uniqueness
+    [ emoji['name'], emoji['aliases'] ].flatten.each do |emoji_alias|
+      if aliases.include?(emoji_alias)
+        add_error "Alias \":#{emoji_alias}:\" maps to multiple emoji!"
+      end
+
+      aliases.push emoji_alias
+    end
+
+    if emoji['category'] == 'Buildkite'
+      # Verify image size
+      begin
+        img = Exiftool.new(emoji['image'])
+
+        if img[:image_width] > 80 || img[:image_height] > 80
+          add_warning "Emoji image \"#{emoji['image']}\" is too large at #{img[:image_size]}!"
+        end
+      rescue Exiftool::NoSuchFile
+        add_error "Emoji image \"#{emoji['image']}\" is missing!"
+      end
+    end
+  end
+
+  if ERRORS.any?
+    raise "✋🏼 Emoji errors found! Please fix them!"
+  elsif WARNINGS.any?
+    puts "🤔 Emoji warnings found. You might want to check those!"
+  else
+    puts "👌🏼 The emoji are all good!"
+  end
+end
+
+desc "Generate Apple emoji JSON from emoji-data"
 task :generate do
   parsed = JSON.parse(File.read(ENV.fetch("EMOJI_JSON")))
   new = []
@@ -111,4 +163,13 @@ task :generate do
   end
 
   puts JSON.pretty_generate(new)
+end
+
+desc "Pick a random emoji"
+task :random do
+  emojis = read_all_emoji
+
+  emoj = emojis[Random.rand(emojis.count)]
+
+  puts ":#{emoj['name']}:"
 end
